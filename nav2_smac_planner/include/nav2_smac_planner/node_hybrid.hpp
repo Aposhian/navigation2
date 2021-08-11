@@ -115,6 +115,11 @@ struct HybridMotionTable
    */
   MotionPoses getProjections(const NodeHybrid * node);
 
+  /**
+   * Note(aposhian): Essentially this vector of poses is acting as a 3D array
+   * of poses. For every x,y cell in the costmap, it also has a slot
+   * for every possible angle, given the angle quantization
+   */
   MotionPoses projections;
   unsigned int size_x;
   unsigned int num_angle_quantization;
@@ -311,6 +316,9 @@ public:
     const unsigned int & x, const unsigned int & y, const unsigned int & angle,
     const unsigned int & width, const unsigned int & angle_quantization)
   {
+    /**
+     * Note(aposhian): This math is just to calculate the index for the "3D array"
+     */
     return angle + x * angle_quantization + y * width * angle_quantization;
   }
 
@@ -375,6 +383,8 @@ public:
 
   /**
    * @brief Compute the SE2 distance heuristic
+   * Note(aposhian): The paper notes that distance without obstacles can
+   * be simply precomputed and translated accordingly
    * @param lookup_table_dim Size, in costmap pixels, of the
    * each lookup table dimension to populate
    * @param motion_model Motion model to use for state space
@@ -399,6 +409,8 @@ public:
 
   /**
    * @brief Compute the Distance heuristic
+   * Note(aposhian): It appears that the obstacle_heuristic is
+   * only provided for non-nominal cases. This is not the combined heuristic
    * @param node_coords Coordinates to get heuristic at
    * @param goal_coords Coordinates to compute heuristic to
    * @param obstacle_heuristic Value of the obstacle heuristic to compute
@@ -421,6 +433,7 @@ public:
 
   /**
    * @brief Retrieve all valid neighbors of a node.
+   * Note(aposhian): This is basically all of the adjacent poses that can be driven to from a given pose
    * @param validity_checker Functor for state validity checking
    * @param collision_checker Collision checker to use
    * @param traverse_unknown If unknown costs are valid to traverse
@@ -432,6 +445,9 @@ public:
     const bool & traverse_unknown,
     NodeVector & neighbors);
 
+  // Note(aposhian): It seems like we are essentially building an n-tree,
+  // where we add children nodes as we expand, and to recreate a path,
+  // we backtrace back to the parent
   NodeHybrid * parent;
   Coordinates pose;
 
@@ -440,6 +456,8 @@ public:
   static HybridMotionTable motion_table;
   // Wavefront lookup and queue for continuing to expand as needed
   static LookupTable obstacle_heuristic_lookup_table;
+  // Note(aposhian): I'm guessing this queue is for implementing A*, but why is it not
+  // for the combined heuristic?
   static std::queue<unsigned int> obstacle_heuristic_queue;
   static nav2_costmap_2d::Costmap2D * sampled_costmap;
   static CostmapDownsampler downsampler;

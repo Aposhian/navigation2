@@ -45,7 +45,8 @@ CostmapDownsampler NodeHybrid::downsampler;
 
 // Each of these tables are the projected motion models through
 // time and space applied to the search on the current node in
-// continuous map-coordinates (e.g. not meters but partial map cells)
+// Note(aposhian): continuous map-coordinates (e.g. not meters but partial map cells)
+//
 // Currently, these are set to project *at minimum* into a neighboring
 // cell. Though this could be later modified to project a certain
 // amount of time or particular distance forward.
@@ -77,9 +78,23 @@ void HybridMotionTable::initDubin(
 
   // angle must meet 3 requirements:
   // 1) be increment of quantized bin size
+  //
+  // Note(aposhian): if the angles must be of quantized bin size, if we want to have a high resolution
+  // costmap to support high resolution waypoints, then we will need an equivalently high
+  // angle_quantization resolution, since the minimum_turning_radius is fixed.
+  // Also, here, the minimum_turning_radius is in costmap units, not to be confused with
+  // the minimum_turning_radius that is passed in meters as a parameter to the ros node.
+  // The conversion is performed in smac_planner_hybrid.cpp:138
+  // Therefore, here, the minimum_turning_radius will
+  // be relatively large for a high resolution costmap, resulting in small maximum angles,
+  // which requires a high resolution of angle quantization
+  //
   // 2) chord length must be greater than sqrt(2) to leave current cell
   // 3) maximum curvature must be respected, represented by minimum turning angle
   // Thusly:
+  //
+  // Note(aposhian): How can you define a circle in terms of an angle? Don't they mean radius?
+  //
   // On circle of radius minimum turning angle, we need select motion primatives
   // with chord length > sqrt(2) and be an increment of our bin size
   //
