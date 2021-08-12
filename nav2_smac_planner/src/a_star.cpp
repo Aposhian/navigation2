@@ -504,9 +504,9 @@ typename AStarAlgorithm<NodeT>::NodePtr AStarAlgorithm<NodeT>::tryAnalyticExpans
       // Reset the counter and try the analytic path expansion
       analytic_iterations = desired_iterations;
       AnalyticExpansionNodes analytic_nodes = getAnalyticPath(current_node, getter);
+      NodePtr node = current_node;
       if (!analytic_nodes.empty()) {
         // If we have a valid path, attempt to refine it
-        NodePtr node = current_node;
         NodePtr test_node = current_node;
         AnalyticExpansionNodes refined_analytic_nodes;
         for (int i = 0; i < 8; i++) {
