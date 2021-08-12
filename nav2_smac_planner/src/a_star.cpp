@@ -50,7 +50,6 @@ AStarAlgorithm<NodeT>::AStarAlgorithm(
   _goal(nullptr),
   _motion_model(motion_model)
 {
-  _graph.reserve(100000);
 }
 
 template<typename NodeT>
@@ -71,6 +70,8 @@ void AStarAlgorithm<NodeT>::initialize(
   _max_on_approach_iterations = max_on_approach_iterations;
   NodeT::precomputeDistanceHeuristic(lookup_table_size, _motion_model, dim_3_size, _search_info);
   _dim3_size = dim_3_size;
+  _graph_size = _x_size * _y_size * _dim3_size;
+  _graph.reserve(_graph_size);
 }
 
 template<>
@@ -89,6 +90,8 @@ void AStarAlgorithm<Node2D>::initialize(
     throw std::runtime_error("Node type Node2D cannot be given non-1 dim 3 quantization.");
   }
   _dim3_size = dim_3_size;
+  _graph_size = _x_size * _y_size;
+  _graph.reserve(_graph_size);
 }
 
 template<typename NodeT>
@@ -429,7 +432,7 @@ void AStarAlgorithm<NodeT>::clearGraph()
 {
   Graph g;
   std::swap(_graph, g);
-  _graph.reserve(100000);
+  _graph.reserve(_graph_size);
 }
 
 template<typename NodeT>

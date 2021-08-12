@@ -290,6 +290,7 @@ protected:
   unsigned int _x_size;
   unsigned int _y_size;
   unsigned int _dim3_size;
+  unsigned int _graph_size;
   SearchInfo _search_info;
 
   Coordinates _goal_coordinates;
