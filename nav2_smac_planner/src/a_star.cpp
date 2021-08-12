@@ -527,9 +527,9 @@ typename AStarAlgorithm<NodeT>::NodePtr AStarAlgorithm<NodeT>::tryAnalyticExpans
             break;
           }
         }
-
-        return setAnalyticPath(node, analytic_nodes);
       }
+      // If no intermediary poses were expanded, then this will just link node to goal
+      return setAnalyticPath(node, analytic_nodes);
     }
 
     analytic_iterations--;
@@ -557,10 +557,11 @@ typename AStarAlgorithm<NodeT>::AnalyticExpansionNodes AStarAlgorithm<NodeT>::ge
 
   // A move of sqrt(2) is guaranteed to be in a new cell
   static const float sqrt_2 = std::sqrt(2.);
+  // If from and to do not move to a new cell, then num_intervals = 0
   unsigned int num_intervals = std::floor(d / sqrt_2);
 
   AnalyticExpansionNodes possible_nodes;
-  possible_nodes.reserve(num_intervals - 1);  // We won't store this node or the goal
+  possible_nodes.reserve(num_intervals);  // We won't store this node or the goal
   std::vector<double> reals;
 
   // Pre-allocate
