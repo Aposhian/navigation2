@@ -317,6 +317,25 @@ geometry_msgs::msg::TwistStamped RegulatedPurePursuitController::computeVelocity
     goal_dist_tol_ = pose_tolerance.position.x;
   }
 
+  // Note(angstrem98): Controller needs to reset internal states in case goal has been calcelled.
+  // Current controller API does not have a callback if this happens, so we reset if controller has
+  // been inactive long enough.
+  rclcpp::Time t = clock_->now();
+  // If controller was interrupted, reset internal states
+  if ((t - system_time_).seconds() >= 4 * control_duration_) {
+    distance_profile_output_.new_position = {0.0};
+    distance_profile_output_.new_velocity = {0.0};
+    distance_profile_output_.new_acceleration = {0.0};
+    distance_profile_output_.pass_to_input(distance_profile_input_);
+
+    angle_profile_output_.new_position = {tf2::getYaw(pose.pose.orientation)};
+    angle_profile_output_.new_velocity = {0.0};
+    angle_profile_output_.new_acceleration = {0.0};
+    angle_profile_output_.pass_to_input(angle_profile_input_);
+  }
+  system_time_ = t;
+
+
   // Transform path to robot base frame
   auto transformed_plan = transformGlobalPlan(pose);
 
@@ -330,7 +349,8 @@ geometry_msgs::msg::TwistStamped RegulatedPurePursuitController::computeVelocity
     lookahead_dist = dist_to_cusp;
   }
 
-  auto carrot_pose = getLookAheadPoint(lookahead_dist, transformed_plan);
+  double remaining_path_length;
+  auto carrot_pose = getLookAheadPoint(lookahead_dist, transformed_plan, remaining_path_length);
   carrot_pub_->publish(createCarrotMsg(carrot_pose));
 
   double linear_vel, angular_vel;
@@ -347,6 +367,11 @@ geometry_msgs::msg::TwistStamped RegulatedPurePursuitController::computeVelocity
     curvature = 2.0 * carrot_pose.pose.position.y / carrot_dist2;
   }
 
+  double carrot_dist = sqrt(carrot_dist2);
+  if (remaining_path_length < carrot_dist) {
+    remaining_path_length = carrot_dist;
+  }
+
   // Setting the velocity direction
   double sign = 1.0;
   if (allow_reversing_) {
@@ -355,13 +380,23 @@ geometry_msgs::msg::TwistStamped RegulatedPurePursuitController::computeVelocity
 
   linear_vel = desired_linear_vel_;
 
+  distance_profile_input_.max_velocity = {desired_linear_vel_};
+
+  robot_angle_ = tf2::getYaw(pose.pose.orientation);
+
   // Make sure we're in compliance with basic constraints
   double angle_to_heading;
-  if (shouldRotateToGoalHeading(carrot_pose)) {
+  if (shouldRotateToGoalHeading(carrot_pose) && !rotating_) {
     double angle_to_goal = tf2::getYaw(transformed_plan.poses.back().pose.orientation);
     rotateToHeading(linear_vel, angular_vel, angle_to_goal, speed);
-  } else if (shouldRotateToPath(carrot_pose, angle_to_heading)) {
-    rotateToHeading(linear_vel, angular_vel, angle_to_heading, speed);
+  } else if (shouldRotateToPath(carrot_pose, angle_to_heading) && !rotating_) {
+    // multiply heading min angle by 0.1 so we rotate just enough
+    rotateToHeading(
+      linear_vel, angular_vel, angle_to_heading - rotate_to_heading_min_angle_ * 0.1, speed);
+  } else if (rotating_) {
+    if (angle_profile_result_ == ruckig::Result::Finished) {
+      rotating_ = false;
+    }
   } else {
     applyConstraints(
       fabs(lookahead_dist - sqrt(carrot_dist2)),
@@ -370,18 +405,51 @@ geometry_msgs::msg::TwistStamped RegulatedPurePursuitController::computeVelocity
 
     // Apply curvature to angular velocity after constraining linear velocity
     angular_vel = linear_vel * curvature;
+
+    distance_profile_input_.control_interface = ruckig::ControlInterface::Position;
+    distance_profile_input_.target_position = {
+      distance_profile_input_.current_position[0] + sign * remaining_path_length};
+    distance_profile_input_.max_velocity = {fabs(linear_vel)};
+
+    angle_profile_input_.control_interface = ruckig::ControlInterface::Velocity;
+    angle_profile_input_.target_velocity = {angular_vel};
+  }
+
+  // Calculate next step for motion profiles
+  distance_profile_result_ = distance_profile_->update(
+    distance_profile_input_, distance_profile_output_);
+  angle_profile_result_ = angle_profile_->update(angle_profile_input_, angle_profile_output_);
+
+  double linear_vel_command = 0.0;
+  double angular_vel_command = 0.0;
+
+  if (distance_profile_result_ == ruckig::Result::Working) {
+    distance_profile_output_.pass_to_input(distance_profile_input_);
+  }
+
+  if (angle_profile_result_ == ruckig::Result::Working) {
+    angle_profile_output_.pass_to_input(angle_profile_input_);
+  }
+
+  linear_vel_command = distance_profile_output_.new_velocity[0];
+  if (angle_profile_input_.control_interface == ruckig::ControlInterface::Velocity) {
+    angular_vel_command = angle_profile_output_.new_velocity[0];
+  } else {
+    // proportional controller for robot angle when we are in position mode
+    angular_vel_command = kp_angle_ * angleNormalize(
+      angle_profile_output_.new_position[0] - robot_angle_);
   }
 
   // Collision checking on this velocity heading
-  if (isCollisionImminent(pose, linear_vel, angular_vel)) {
+  if (isCollisionImminent(pose, linear_vel_command, angular_vel_command, carrot_dist)) {
     throw nav2_core::PlannerException("RegulatedPurePursuitController detected collision ahead!");
   }
 
   // populate and return message
   geometry_msgs::msg::TwistStamped cmd_vel;
   cmd_vel.header = pose.header;
-  cmd_vel.twist.linear.x = linear_vel;
-  cmd_vel.twist.angular.z = angular_vel;
+  cmd_vel.twist.linear.x = linear_vel_command;
+  cmd_vel.twist.angular.z = angular_vel_command;
   return cmd_vel;
 }
 
@@ -723,6 +791,102 @@ bool RegulatedPurePursuitController::transformPose(
     RCLCPP_ERROR(logger_, "Exception in transformPose: %s", ex.what());
   }
   return false;
+}
+
+double RegulatedPurePursuitController::angleNormalize(double angle)
+{
+  while (angle > M_PI) {
+    angle -= 2.0 * M_PI;
+  }
+  while (angle < -M_PI) {
+    angle += 2.0 * M_PI;
+  }
+
+  return angle;
+}
+
+rcl_interfaces::msg::SetParametersResult
+RegulatedPurePursuitController::dynamicParametersCallback(
+  std::vector<rclcpp::Parameter> parameters)
+{
+  rcl_interfaces::msg::SetParametersResult result;
+  std::lock_guard<std::mutex> lock_reinit(mutex_);
+
+  for (auto parameter : parameters) {
+    const auto & type = parameter.get_type();
+    const auto & name = parameter.get_name();
+
+    if (type == ParameterType::PARAMETER_DOUBLE) {
+      if (name == plugin_name_ + ".inflation_cost_scaling_factor") {
+        if (parameter.as_double() <= 0.0) {
+          RCLCPP_WARN(
+            logger_, "The value inflation_cost_scaling_factor is incorrectly set, "
+            "it should be >0. Ignoring parameter update.");
+          continue;
+        }
+        inflation_cost_scaling_factor_ = parameter.as_double();
+      } else if (name == plugin_name_ + ".desired_linear_vel") {
+        desired_linear_vel_ = parameter.as_double();
+        base_desired_linear_vel_ = parameter.as_double();
+      } else if (name == plugin_name_ + ".lookahead_dist") {
+        lookahead_dist_ = parameter.as_double();
+      } else if (name == plugin_name_ + ".max_lookahead_dist") {
+        max_lookahead_dist_ = parameter.as_double();
+      } else if (name == plugin_name_ + ".min_lookahead_dist") {
+        min_lookahead_dist_ = parameter.as_double();
+      } else if (name == plugin_name_ + ".lookahead_time") {
+        lookahead_time_ = parameter.as_double();
+      } else if (name == plugin_name_ + ".rotate_to_heading_angular_vel") {
+        rotate_to_heading_angular_vel_ = parameter.as_double();
+      } else if (name == plugin_name_ + ".min_approach_linear_velocity") {
+        min_approach_linear_velocity_ = parameter.as_double();
+      } else if (name == plugin_name_ + ".max_allowed_time_to_collision_up_to_carrot") {
+        max_allowed_time_to_collision_up_to_carrot_ = parameter.as_double();
+      } else if (name == plugin_name_ + ".cost_scaling_dist") {
+        cost_scaling_dist_ = parameter.as_double();
+      } else if (name == plugin_name_ + ".cost_scaling_gain") {
+        cost_scaling_gain_ = parameter.as_double();
+      } else if (name == plugin_name_ + ".regulated_linear_scaling_min_radius") {
+        regulated_linear_scaling_min_radius_ = parameter.as_double();
+      } else if (name == plugin_name_ + ".transform_tolerance") {
+        double transform_tolerance = parameter.as_double();
+        transform_tolerance_ = tf2::durationFromSec(transform_tolerance);
+      } else if (name == plugin_name_ + ".regulated_linear_scaling_min_speed") {
+        regulated_linear_scaling_min_speed_ = parameter.as_double();
+      } else if (name == plugin_name_ + ".max_angular_accel") {
+        max_angular_accel_ = parameter.as_double();
+      } else if (name == plugin_name_ + ".rotate_to_heading_min_angle") {
+        rotate_to_heading_min_angle_ = parameter.as_double();
+      }
+    } else if (type == ParameterType::PARAMETER_BOOL) {
+      if (name == plugin_name_ + ".use_velocity_scaled_lookahead_dist") {
+        use_velocity_scaled_lookahead_dist_ = parameter.as_bool();
+      } else if (name == plugin_name_ + ".use_regulated_linear_velocity_scaling") {
+        use_regulated_linear_velocity_scaling_ = parameter.as_bool();
+      } else if (name == plugin_name_ + ".use_cost_regulated_linear_velocity_scaling") {
+        use_cost_regulated_linear_velocity_scaling_ = parameter.as_bool();
+      } else if (name == plugin_name_ + ".use_rotate_to_heading") {
+        if (parameter.as_bool() && allow_reversing_) {
+          RCLCPP_WARN(
+            logger_, "Both use_rotate_to_heading and allow_reversing "
+            "parameter cannot be set to true. Rejecting parameter update.");
+          continue;
+        }
+        use_rotate_to_heading_ = parameter.as_bool();
+      } else if (name == plugin_name_ + ".allow_reversing") {
+        if (use_rotate_to_heading_ && parameter.as_bool()) {
+          RCLCPP_WARN(
+            logger_, "Both use_rotate_to_heading and allow_reversing "
+            "parameter cannot be set to true. Rejecting parameter update.");
+          continue;
+        }
+        allow_reversing_ = parameter.as_bool();
+      }
+    }
+  }
+
+  result.successful = true;
+  return result;
 }
 
 }  // namespace nav2_regulated_pure_pursuit_controller
