@@ -237,6 +237,8 @@ protected:
   rclcpp::Logger logger_ {rclcpp::get_logger("RegulatedPurePursuitController")};
 
   double desired_linear_vel_, base_desired_linear_vel_;
+  double max_linear_accel_;
+  double max_linear_decel_;
   double lookahead_dist_;
   double rotate_to_heading_angular_vel_;
   double max_lookahead_dist_;
@@ -263,12 +265,34 @@ protected:
   double goal_dist_tol_;
   bool allow_reversing_;
   double max_distance_between_iterations_;
+  double robot_angle_;
+  bool rotating_;
+  double kp_angle_;
+  double max_linear_jerk_;
+  double max_angular_jerk_;
+  rclcpp::Time system_time_;
 
   nav_msgs::msg::Path global_plan_;
   std::shared_ptr<rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::Path>> global_path_pub_;
   std::shared_ptr<rclcpp_lifecycle::LifecyclePublisher<geometry_msgs::msg::PointStamped>>
   carrot_pub_;
   std::shared_ptr<rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::Path>> carrot_arc_pub_;
+  std::unique_ptr<nav2_costmap_2d::FootprintCollisionChecker<nav2_costmap_2d::Costmap2D *>>
+  collision_checker_;
+
+  ruckig::Ruckig<1> * distance_profile_;
+  ruckig::InputParameter<1> distance_profile_input_;
+  ruckig::OutputParameter<1> distance_profile_output_;
+  ruckig::Result distance_profile_result_;
+
+  ruckig::Ruckig<1> * angle_profile_;
+  ruckig::InputParameter<1> angle_profile_input_;
+  ruckig::OutputParameter<1> angle_profile_output_;
+  ruckig::Result angle_profile_result_;
+
+  // Dynamic parameters handler
+  std::mutex mutex_;
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr dyn_params_handler_;
 };
 
 }  // namespace nav2_regulated_pure_pursuit_controller
