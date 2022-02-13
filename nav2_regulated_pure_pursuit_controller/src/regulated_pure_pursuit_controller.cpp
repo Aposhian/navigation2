@@ -594,13 +594,12 @@ double RegulatedPurePursuitController::costAtPose(const double & x, const double
 }
 
 void RegulatedPurePursuitController::applyConstraints(
-  const double & dist_error, const double & lookahead_dist,
-  const double & curvature, const geometry_msgs::msg::Twist & curr_speed,
+  const double & /*dist_error*/, const double & /*lookahead_dist*/,
+  const double & curvature, const geometry_msgs::msg::Twist & /*curr_speed*/,
   const double & pose_cost, double & linear_vel, double & sign)
 {
   double curvature_vel = linear_vel;
   double cost_vel = linear_vel;
-  double approach_vel = linear_vel;
 
   // limit the linear velocity by curvature
   const double radius = fabs(1.0 / curvature);
