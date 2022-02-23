@@ -110,13 +110,16 @@ public:
 
 protected:
   /**
-   * @brief Transforms global plan into same frame as pose, clips far away poses and possibly prunes passed poses
+   * @brief Transforms global plan into same frame as pose and clips poses ineligible for lookaheadPoint
+   * Points ineligible to be selected as a lookahead point if they are any of the following:
+   * - Outside the local_costmap (collision avoidance cannot be assured)
+   * - Beyond a "cusp": a change from forward to reverse or vice-versa
    * @param pose pose to transform
    * @return Path in new frame
    */
   nav_msgs::msg::Path transformGlobalPlan(
     const geometry_msgs::msg::PoseStamped & pose,
-    double dist_to_direction_change);
+    double dist_to_cusp);
 
   /**
    * @brief Transform a pose to another frame.
@@ -227,7 +230,7 @@ protected:
    * @param pose Pose input to determine the cusp position
    * @return robot distance from the cusp
    */
-  double findDirectionChange(const geometry_msgs::msg::PoseStamped & pose);
+  double findCusp(const geometry_msgs::msg::PoseStamped & pose);
 
   std::shared_ptr<tf2_ros::Buffer> tf_;
   std::string plugin_name_;
