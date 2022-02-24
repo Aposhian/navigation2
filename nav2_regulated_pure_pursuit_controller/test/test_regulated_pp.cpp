@@ -91,15 +91,12 @@ public:
       dist_error, lookahead_dist, curvature, curr_speed, pose_cost,
       linear_vel, sign);
   }
-<<<<<<< HEAD
-=======
 
   double findCuspWrapper(
     const geometry_msgs::msg::PoseStamped & pose)
   {
     return findCusp(pose);
   }
->>>>>>> 77c88bfd... rename findDirectionChange to findCusp
 };
 
 TEST(RegulatedPurePursuitTest, basicAPI)
