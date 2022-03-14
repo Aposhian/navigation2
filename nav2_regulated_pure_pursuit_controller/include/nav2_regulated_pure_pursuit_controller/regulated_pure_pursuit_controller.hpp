@@ -28,6 +28,7 @@
 #include "nav2_util/odometry_utils.hpp"
 #include "nav2_util/geometry_utils.hpp"
 #include "geometry_msgs/msg/pose2_d.hpp"
+#include "ruckig/ruckig.hpp"
 
 namespace nav2_regulated_pure_pursuit_controller
 {
@@ -262,8 +263,6 @@ protected:
   double max_lookahead_dist_;
   double min_lookahead_dist_;
   double lookahead_time_;
-  double max_linear_accel_;
-  double max_linear_decel_;
   bool use_velocity_scaled_lookahead_dist_;
   tf2::Duration transform_tolerance_;
   bool use_approach_vel_scaling_;
@@ -290,13 +289,12 @@ protected:
   double max_angular_jerk_;
   rclcpp::Time system_time_;
 
+  rclcpp_lifecycle::LifecycleNode::WeakPtr node_;
   nav_msgs::msg::Path global_plan_;
   std::shared_ptr<rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::Path>> global_path_pub_;
   std::shared_ptr<rclcpp_lifecycle::LifecyclePublisher<geometry_msgs::msg::PointStamped>>
   carrot_pub_;
   std::shared_ptr<rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::Path>> carrot_arc_pub_;
-  std::unique_ptr<nav2_costmap_2d::FootprintCollisionChecker<nav2_costmap_2d::Costmap2D *>>
-  collision_checker_;
 
   ruckig::Ruckig<1> * distance_profile_;
   ruckig::InputParameter<1> distance_profile_input_;

@@ -42,6 +42,7 @@ void RegulatedPurePursuitController::configure(
   const std::shared_ptr<nav2_costmap_2d::Costmap2DROS> & costmap_ros)
 {
   auto node = parent.lock();
+  node_ = parent;
   if (!node) {
     throw nav2_core::PlannerException("Unable to lock node!");
   }
@@ -193,15 +194,10 @@ void RegulatedPurePursuitController::configure(
   carrot_pub_ = node->create_publisher<geometry_msgs::msg::PointStamped>("lookahead_point", 1);
   carrot_arc_pub_ = node->create_publisher<nav_msgs::msg::Path>("lookahead_collision_arc", 1);
 
-  // initialize collision checker and set costmap
-  collision_checker_ = std::make_unique<nav2_costmap_2d::
-      FootprintCollisionChecker<nav2_costmap_2d::Costmap2D *>>(costmap_);
-  collision_checker_->setCostmap(costmap_);
-
   distance_profile_ = new ruckig::Ruckig<1>{control_duration_};
   angle_profile_ = new ruckig::Ruckig<1>{control_duration_};
 
-  system_time_ = clock_->now();
+  system_time_ = node_.lock()->get_clock()->now();
 }
 
 void RegulatedPurePursuitController::cleanup()
@@ -320,7 +316,7 @@ geometry_msgs::msg::TwistStamped RegulatedPurePursuitController::computeVelocity
   // Note(angstrem98): Controller needs to reset internal states in case goal has been calcelled.
   // Current controller API does not have a callback if this happens, so we reset if controller has
   // been inactive long enough.
-  rclcpp::Time t = clock_->now();
+  rclcpp::Time t = node_.lock()->get_clock()->now();
   // If controller was interrupted, reset internal states
   if ((t - system_time_).seconds() >= 4 * control_duration_) {
     distance_profile_output_.new_position = {0.0};
@@ -441,7 +437,7 @@ geometry_msgs::msg::TwistStamped RegulatedPurePursuitController::computeVelocity
   }
 
   // Collision checking on this velocity heading
-  if (isCollisionImminent(pose, linear_vel_command, angular_vel_command, carrot_dist)) {
+  if (isCollisionImminent(pose, linear_vel_command, angular_vel_command)) {
     throw nav2_core::PlannerException("RegulatedPurePursuitController detected collision ahead!");
   }
 
@@ -595,12 +591,13 @@ double RegulatedPurePursuitController::costAtPose(const double & x, const double
 }
 
 void RegulatedPurePursuitController::applyConstraints(
-  const double & /*dist_error*/, const double & /*lookahead_dist*/,
-  const double & curvature, const geometry_msgs::msg::Twist & /*curr_speed*/,
+  const double & dist_error, const double & lookahead_dist,
+  const double & curvature, const geometry_msgs::msg::Twist & curr_speed,
   const double & pose_cost, double & linear_vel, double & sign)
 {
   double curvature_vel = linear_vel;
   double cost_vel = linear_vel;
+  double approach_vel = linear_vel;
 
   // limit the linear velocity by curvature
   const double radius = fabs(1.0 / curvature);
@@ -819,7 +816,7 @@ RegulatedPurePursuitController::dynamicParametersCallback(
     const auto & type = parameter.get_type();
     const auto & name = parameter.get_name();
 
-    if (type == ParameterType::PARAMETER_DOUBLE) {
+    if (type == rclcpp::ParameterType::PARAMETER_DOUBLE) {
       if (name == plugin_name_ + ".inflation_cost_scaling_factor") {
         if (parameter.as_double() <= 0.0) {
           RCLCPP_WARN(
@@ -843,8 +840,8 @@ RegulatedPurePursuitController::dynamicParametersCallback(
         rotate_to_heading_angular_vel_ = parameter.as_double();
       } else if (name == plugin_name_ + ".min_approach_linear_velocity") {
         min_approach_linear_velocity_ = parameter.as_double();
-      } else if (name == plugin_name_ + ".max_allowed_time_to_collision_up_to_carrot") {
-        max_allowed_time_to_collision_up_to_carrot_ = parameter.as_double();
+      } else if (name == plugin_name_ + ".max_allowed_time_to_collision") {
+        max_allowed_time_to_collision_ = parameter.as_double();
       } else if (name == plugin_name_ + ".cost_scaling_dist") {
         cost_scaling_dist_ = parameter.as_double();
       } else if (name == plugin_name_ + ".cost_scaling_gain") {
@@ -861,7 +858,7 @@ RegulatedPurePursuitController::dynamicParametersCallback(
       } else if (name == plugin_name_ + ".rotate_to_heading_min_angle") {
         rotate_to_heading_min_angle_ = parameter.as_double();
       }
-    } else if (type == ParameterType::PARAMETER_BOOL) {
+    } else if (type == rclcpp::ParameterType::PARAMETER_BOOL) {
       if (name == plugin_name_ + ".use_velocity_scaled_lookahead_dist") {
         use_velocity_scaled_lookahead_dist_ = parameter.as_bool();
       } else if (name == plugin_name_ + ".use_regulated_linear_velocity_scaling") {
